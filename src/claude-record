@@ -13,11 +13,18 @@ set -euo pipefail
 
 # Script configuration
 SCRIPT_NAME="claude-record"
-SCRIPT_VERSION="1.0"
+SCRIPT_VERSION="2.0-alpha"
 DEFAULT_LOG_DIR="$HOME/Documents/claude"
 DEFAULT_MAX_SIZE="100M"
 DEFAULT_MAX_SESSIONS=50
 CLAUDE_CMD="claude"
+
+# v2.0 Configuration
+AUTO_SUMMARIZE=true
+SUMMARY_TIMEOUT=30
+MIN_SESSION_LENGTH=60
+MAX_LOG_SIZE_FOR_SUMMARY=$((10 * 1024 * 1024))  # 10MB in bytes
+SUMMARIZE_ONLY=false
 
 # Color codes for output
 RED='\033[0;31m'
@@ -116,6 +123,8 @@ OPTIONS:
     --list                 List all recorded sessions and exit
     --search TERM          Search through recorded sessions for TERM
     --no-auto-cleanup      Disable automatic cleanup of old sessions
+    --no-summarize         Disable automatic summary generation (v2.0)
+    --summarize-only       Generate summary for most recent session and exit (v2.0)
     --version              Show version information
 
 SIZE FORMAT:
@@ -444,6 +453,245 @@ search_sessions() {
     fi
 }
 
+#==============================================================================
+# v2.0 SUMMARIZATION FUNCTIONS
+#==============================================================================
+
+# Get summary prompt template
+get_summary_prompt() {
+    local session_id="$1"
+    local session_date="$2"
+    local duration="$3"
+    local log_contents="$4"
+
+    # Format date nicely
+    local formatted_date=$(echo "$session_date" | cut -d'T' -f1-2 | tr 'T' ' ')
+
+    # Truncate log if too long (safety measure)
+    local log_length=${#log_contents}
+    if (( log_length > 100000 )); then
+        log_contents="${log_contents:0:100000}... [truncated]"
+    fi
+
+    # Build prompt
+    cat << EOF
+You are analyzing a Claude Code session log. Generate a concise summary following this EXACT format (use markdown):
+
+# Session Summary
+**Session ID**: ${session_id}
+**Date**: ${formatted_date}
+**Duration**: ${duration}
+**Model**: claude-sonnet-4-5
+
+## Overview
+[2-3 sentences describing what was accomplished]
+
+## Tasks Completed
+- [Specific task with outcome]
+- [Another task with outcome]
+
+## Key Decisions & Insights
+- [Important decision or learning]
+- [Another insight]
+
+## Files Modified
+- \`/path/to/file\` - Brief description
+- \`/another/file\` - Brief description
+
+## Technologies/Topics
+\`keyword1\`, \`keyword2\`, \`keyword3\`, ...
+
+## Context for Future Reference
+[Important context that would help understand this session later.
+Include architectural decisions, gotchas, or warnings.]
+
+## Follow-up Items
+- [ ] Incomplete item or future enhancement
+- [ ] Another follow-up
+
+## Related Sessions
+[If you can identify related past sessions from context, list them as:
+claude_conversation.YYYYMMDD-HHMMSS]
+
+---
+
+IMPORTANT GUIDELINES:
+- Keep summary concise but informative (aim for 200-400 words total)
+- Focus on WHAT was done and WHY, not detailed HOW
+- Extract key technical concepts for searchability
+- Be specific about file paths and changes
+- Identify clear action items from the session
+- Use consistent formatting
+- If session was very short or trivial, say so clearly
+
+Session log follows:
+---
+${log_contents}
+---
+EOF
+}
+
+# Generate summary using Claude Code
+generate_summary_claude_code() {
+    local log_file="$1"
+    local summary_file="$2"
+
+    # Get session metadata
+    local meta_file="${log_file%.log}.meta"
+    local session_id=$(basename "$log_file" .log)
+    local session_date=$(grep 'session_start=' "$meta_file" 2>/dev/null | cut -d'"' -f2 || echo "unknown")
+
+    # Calculate duration
+    local duration="unknown"
+    local start_time=$(grep 'session_start=' "$meta_file" 2>/dev/null | cut -d'"' -f2)
+    local end_time=$(grep 'session_end=' "$meta_file" 2>/dev/null | cut -d'"' -f2)
+
+    if [[ -n "$start_time" ]] && [[ -n "$end_time" ]]; then
+        # Try to calculate duration (macOS compatible)
+        local start_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${start_time:0:19}" "+%s" 2>/dev/null || echo "0")
+        local end_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${end_time:0:19}" "+%s" 2>/dev/null || echo "0")
+
+        if [[ "$start_epoch" != "0" ]] && [[ "$end_epoch" != "0" ]]; then
+            local duration_seconds=$((end_epoch - start_epoch))
+            if (( duration_seconds >= 3600 )); then
+                duration=$(printf "%dh %dm" $((duration_seconds/3600)) $(((duration_seconds%3600)/60)))
+            elif (( duration_seconds >= 60 )); then
+                duration=$(printf "%dm %ds" $((duration_seconds/60)) $((duration_seconds%60)))
+            else
+                duration="${duration_seconds}s"
+            fi
+        fi
+    fi
+
+    # Read log contents
+    local log_contents
+    if [[ -f "$log_file" ]]; then
+        log_contents=$(cat "$log_file")
+    else
+        log_error "Log file not found: $log_file"
+        return 1
+    fi
+
+    # Generate prompt
+    local prompt=$(get_summary_prompt "$session_id" "$session_date" "$duration" "$log_contents")
+
+    # Call Claude Code
+    verbose_log "Calling Claude Code to generate summary..."
+    if echo "$prompt" | "$CLAUDE_CMD" --print > "$summary_file" 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Generate summary with timeout protection
+generate_summary_with_timeout() {
+    local log_file="$1"
+    local summary_file="$2"
+    local timeout_seconds="${SUMMARY_TIMEOUT:-30}"
+
+    # Start summarization in background
+    generate_summary_claude_code "$log_file" "$summary_file" &
+    local pid=$!
+
+    # Wait with timeout and progress indicator
+    local elapsed=0
+    while kill -0 $pid 2>/dev/null; do
+        sleep 1
+        ((elapsed++))
+
+        # Show progress every 5 seconds
+        if (( elapsed % 5 == 0 )); then
+            verbose_log "Generating summary... ${elapsed}s"
+        fi
+
+        # Check timeout
+        if (( elapsed >= timeout_seconds )); then
+            # Timeout reached - kill process
+            kill -9 $pid 2>/dev/null
+            wait $pid 2>/dev/null || true
+            log_warning "Summary generation timed out after ${timeout_seconds}s"
+            return 1
+        fi
+    done
+
+    # Process completed - check result
+    wait $pid
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]] && [[ -s "$summary_file" ]]; then
+        # Success
+        local file_size=$(stat -f%z "$summary_file" 2>/dev/null || stat -c%s "$summary_file" 2>/dev/null || echo 0)
+        verbose_log "Summary created ($(bytes_to_size $file_size))"
+        return 0
+    else
+        # Failed - clean up partial file
+        [[ -f "$summary_file" ]] && rm -f "$summary_file"
+        return 1
+    fi
+}
+
+# Main summary generation function
+generate_summary() {
+    local log_file="$1"
+    local summary_file="$2"
+
+    # Check if summarization is enabled
+    if [[ "$AUTO_SUMMARIZE" != "true" ]]; then
+        return 0  # Skip, not an error
+    fi
+
+    # Check if log file exists
+    if [[ ! -f "$log_file" ]] || [[ ! -r "$log_file" ]]; then
+        log_error "Log file not found or not readable: $log_file"
+        return 1
+    fi
+
+    # Check log size (skip if too large)
+    local log_size=$(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null || echo 0)
+    if (( log_size > MAX_LOG_SIZE_FOR_SUMMARY )); then
+        log_warning "Log file too large for summarization ($(bytes_to_size $log_size) > $(bytes_to_size $MAX_LOG_SIZE_FOR_SUMMARY))"
+        log_info "Skipping summary generation"
+        return 0  # Skip, not an error
+    fi
+
+    # Check minimum session length (if we can determine it)
+    local meta_file="${log_file%.log}.meta"
+    if [[ -f "$meta_file" ]]; then
+        local start_time=$(grep 'session_start=' "$meta_file" 2>/dev/null | cut -d'"' -f2)
+        local end_time=$(grep 'session_end=' "$meta_file" 2>/dev/null | cut -d'"' -f2)
+
+        if [[ -n "$start_time" ]] && [[ -n "$end_time" ]]; then
+            local start_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${start_time:0:19}" "+%s" 2>/dev/null || echo "0")
+            local end_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${end_time:0:19}" "+%s" 2>/dev/null || echo "0")
+
+            if [[ "$start_epoch" != "0" ]] && [[ "$end_epoch" != "0" ]]; then
+                local duration=$((end_epoch - start_epoch))
+                if (( duration < MIN_SESSION_LENGTH )); then
+                    verbose_log "Session too short for summarization (${duration}s < ${MIN_SESSION_LENGTH}s)"
+                    return 0  # Skip, not an error
+                fi
+            fi
+        fi
+    fi
+
+    # Generate summary
+    log_info "Generating session summary..."
+
+    if generate_summary_with_timeout "$log_file" "$summary_file"; then
+        log_success "Summary generated successfully"
+        return 0
+    else
+        log_warning "Summary generation failed"
+        log_info "You can try later with: claude-record --summarize-only"
+        return 1
+    fi
+}
+
+#==============================================================================
+# END v2.0 SUMMARIZATION FUNCTIONS
+#==============================================================================
+
 # Check if Claude command exists
 check_claude_command() {
     if ! command -v "$CLAUDE_CMD" &> /dev/null; then
@@ -499,6 +747,14 @@ parse_args() {
                 ;;
             --no-auto-cleanup)
                 AUTO_CLEANUP=false
+                shift
+                ;;
+            --no-summarize)
+                AUTO_SUMMARIZE=false
+                shift
+                ;;
+            --summarize-only)
+                SUMMARIZE_ONLY=true
                 shift
                 ;;
             --version)
@@ -572,7 +828,49 @@ main() {
         cleanup_old_sessions
         exit 0
     fi
-    
+
+    # v2.0: Handle --summarize-only mode
+    if [[ "$SUMMARIZE_ONLY" == "true" ]]; then
+        setup_log_directory
+
+        # Find most recent log file
+        local latest_log=$(find "$LOG_DIR" -name "*.log" -type f 2>/dev/null | sort -r | head -1)
+
+        if [[ -z "$latest_log" ]]; then
+            log_error "No session logs found in $LOG_DIR"
+            exit 1
+        fi
+
+        local summary_file="${latest_log%.log}.summary"
+
+        # Check if summary already exists
+        if [[ -f "$summary_file" ]]; then
+            log_warning "Summary already exists: $(basename "$summary_file")"
+            read -p "Regenerate? (y/N) " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                log_info "Aborted"
+                exit 0
+            fi
+        fi
+
+        log_info "Generating summary for: $(basename "$latest_log")"
+
+        if generate_summary "$latest_log" "$summary_file"; then
+            # Update metadata
+            local meta_file="${latest_log%.log}.meta"
+            if [[ -f "$meta_file" ]] && ! grep -q "has_summary=" "$meta_file"; then
+                echo 'has_summary="true"' >> "$meta_file"
+            fi
+
+            log_success "Summary saved to: $(basename "$summary_file")"
+            exit 0
+        else
+            log_error "Failed to generate summary"
+            exit 1
+        fi
+    fi
+
     # Check for Claude command
     check_claude_command
     
@@ -649,16 +947,33 @@ main() {
     local end_time=$(date -Iseconds)
     local final_size=$(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null || echo 0)
     update_metadata "$log_file" "$end_time" "$final_size"
-    
+
     echo
     log_success "Session recorded to: $(basename "$log_file")"
     log_success "Session size: $(bytes_to_size "$final_size")"
-    
+
+    # v2.0: Generate summary
+    if [[ "$AUTO_SUMMARIZE" == "true" ]]; then
+        local summary_file="${log_file%.log}.summary"
+
+        if generate_summary "$log_file" "$summary_file"; then
+            # Update metadata to indicate summary exists
+            local meta_file="${log_file%.log}.meta"
+            echo 'has_summary="true"' >> "$meta_file"
+
+            log_success "Summary saved to: $(basename "$summary_file")"
+        else
+            # Non-fatal error - session is still recorded
+            verbose_log "Session recorded without summary"
+        fi
+        echo
+    fi
+
     # Check if rotation is needed
     if check_file_size "$log_file"; then
         log_warning "Session file exceeds size limit, consider using --max-size option"
     fi
-    
+
     exit $exit_code
 }
 
