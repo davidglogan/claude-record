@@ -1,0 +1,48 @@
+{
+  "index_version": "2.0",
+  "last_updated": "2025-10-23T23:53:12Z",
+  "total_sessions": 42,
+  "keywords": {
+    "python": {
+      "sessions": [
+        "claude_conversation.20251023-234848",
+        "claude_conversation.20251022-154321",
+        "claude_conversation.20251021-093015"
+      ],
+      "frequency": 15,
+      "last_used": "2025-10-23T23:53:12Z"
+    },
+    "api-design": {
+      "sessions": [
+        "claude_conversation.20251023-234848",
+        "claude_conversation.20251022-154321"
+      ],
+      "frequency": 7,
+      "last_used": "2025-10-23T23:53:12Z"
+    },
+    "authentication": {
+      "sessions": [
+        "claude_conversation.20251023-234848"
+      ],
+      "frequency": 1,
+      "last_used": "2025-10-23T23:53:12Z"
+    },
+    "testing": {
+      "sessions": [
+        "claude_conversation.20251023-234848",
+        "claude_conversation.20251020-141205"
+      ],
+      "frequency": 5,
+      "last_used": "2025-10-23T23:53:12Z"
+    },
+    "flask": {
+      "sessions": [
+        "claude_conversation.20251023-234848",
+        "claude_conversation.20251022-154321",
+        "claude_conversation.20251019-101530"
+      ],
+      "frequency": 12,
+      "last_used": "2025-10-23T23:53:12Z"
+    }
+  }
+}

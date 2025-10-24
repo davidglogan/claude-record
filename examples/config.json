@@ -1,0 +1,36 @@
+{
+  "version": "2.0",
+  "summarization": {
+    "enabled": true,
+    "method": "claude-code",
+    "fallback_method": "api",
+    "timeout_seconds": 30,
+    "min_session_length_seconds": 60,
+    "max_log_size_mb": 10,
+    "background_mode": false,
+    "api_key_env": "ANTHROPIC_API_KEY"
+  },
+  "context_retrieval": {
+    "enabled": true,
+    "mode": "recent",
+    "num_recent": 3,
+    "show_in_terminal": true,
+    "pass_to_claude": false,
+    "max_context_tokens": 4000
+  },
+  "indexing": {
+    "enabled": true,
+    "auto_update": true,
+    "extract_from_files": true,
+    "custom_keywords": []
+  },
+  "performance": {
+    "max_log_size_for_summary": "10M",
+    "cache_summaries": true
+  },
+  "platform": {
+    "os": "auto",
+    "shell": "auto",
+    "date_format": "iso8601"
+  }
+}

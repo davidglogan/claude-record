@@ -1,0 +1,55 @@
+{
+  "index_version": "2.0",
+  "last_updated": "2025-10-23T23:53:12Z",
+  "sessions": {
+    "claude_conversation.20251023-234848": {
+      "date": "2025-10-23T23:48:48Z",
+      "duration_seconds": 2732,
+      "size_bytes": 45632,
+      "has_summary": true,
+      "keywords": [
+        "python",
+        "flask",
+        "jwt",
+        "authentication",
+        "api-design",
+        "testing",
+        "bcrypt",
+        "security"
+      ],
+      "summary_excerpt": "Implemented REST API authentication endpoint with JWT token support and added comprehensive test suite...",
+      "files_modified": [
+        "/src/api/auth.py",
+        "/src/middleware/jwt.py",
+        "/tests/test_auth.py",
+        "/docs/api.md"
+      ],
+      "model": "claude-sonnet-4-5",
+      "working_directory": "/Users/dave.logan/projects/myapi",
+      "related_sessions": [
+        "claude_conversation.20251022-154321"
+      ]
+    },
+    "claude_conversation.20251022-154321": {
+      "date": "2025-10-22T15:43:21Z",
+      "duration_seconds": 1845,
+      "size_bytes": 32104,
+      "has_summary": true,
+      "keywords": [
+        "python",
+        "flask",
+        "api-design",
+        "architecture",
+        "planning"
+      ],
+      "summary_excerpt": "Designed API architecture for user service including authentication, authorization, and user management endpoints...",
+      "files_modified": [
+        "/docs/api-design.md",
+        "/docs/architecture.md"
+      ],
+      "model": "claude-sonnet-4-5",
+      "working_directory": "/Users/dave.logan/projects/myapi",
+      "related_sessions": []
+    }
+  }
+}

@@ -1,0 +1,61 @@
+# Claude Record .gitignore
+
+# Session logs and recordings (users' personal data)
+*.log
+*.log.raw
+*.meta
+*.summary
+
+# User configuration
+.claude-record/
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.*.kate-swp
+
+# Testing artifacts
+tests/fixtures/output/
+tests/temp/
+test-sessions/
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+*.zip
+
+# OS files
+.DS_Store
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# Node.js (if we add any tooling)
+node_modules/
+package-lock.json
+
+# Python (if we add any tooling)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+.venv/
+
+# Credentials and secrets
+.env
+.env.local
+credentials.json
+api-keys.txt
