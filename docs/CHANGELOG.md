@@ -5,40 +5,54 @@ All notable changes to Claude Record will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - v2.0-dev
+## [Unreleased] - v2.0-alpha
 
-### Added
-- **AI-Powered Summarization**: Automatic session summaries using Claude
-- **Keyword Indexing**: Fast keyword-based search across sessions
-- **Context Retrieval**: Automatic surfacing of relevant past sessions
-- **Smart Context Mode**: Intelligent context based on recent work and current directory
-- **Configuration System**: JSON-based configuration file
-- **Summary Management**: Commands to view, generate, and manage summaries
-- **Index Management**: Commands to rebuild and query indexes
-- New flags:
+### Added - Phase 2 (2025-10-25)
+- **Keyword Indexing**: Automatic extraction and indexing of session keywords
+  - Multi-source keyword extraction (summaries, file extensions, tech keywords)
+  - Session index with metadata, keywords, and excerpts
+  - Keyword index with session mappings and frequency tracking
+  - Automatic index updates after summarization
+- **Index Management**: Command to rebuild indexes
+  - `--rebuild-index` - Rebuild all indexes from existing summaries
+  - Indexes stored in `~/.claude-record/` as JSON
+  - Graceful handling of missing jq dependency
+
+### Added - Phase 1 (2025-10-24)
+- **AI-Powered Summarization**: Automatic session summaries using Claude Code
+  - 8-section markdown summaries (Overview, Tasks, Decisions, Files, etc.)
+  - Smart validation (skips sessions <60s or logs >10MB)
+  - Timeout protection (30 seconds with progress indicators)
+- **Summary Management**: Commands to control summarization
   - `--no-summarize` - Skip automatic summarization
-  - `--summarize-only` - Generate summary for last session
-  - `--summarize-all` - Bulk summarize old sessions
-  - `--no-context` - Skip context retrieval
-  - `--smart-context` - Use intelligent context mode
-  - `--context KEYWORDS` - Search for specific context
-  - `--recent N` - Show N recent sessions
-  - `--rebuild-index` - Rebuild all indexes
-  - `--show-index` - Show index statistics
-  - `--list-topics` - List all indexed keywords
-  - `--search-summaries TERM` - Search through summaries
-  - `--sessions-by-topic TOPIC` - List sessions by topic
+  - `--summarize-only` - Generate summary for most recent session
+- **Summary Format**: Structured markdown with metadata header
+  - Session ID, date, duration, model information
+  - Technologies/Topics section for keyword extraction
+  - Files Modified section with paths
+  - Follow-up items and related sessions
 
 ### Changed
 - Summary files (*.summary) now created alongside logs
 - Metadata format extended with `has_summary` field
 - Index files stored in `.claude-record/` directory
+- Script size: 1,443 lines (was 676 for v1.0)
 
 ### Technical
-- New file structure: `.claude-record/` for config and indexes
+- New file structure: `.claude-record/` for indexes
 - JSON-based indexes for fast lookup
 - Markdown format for summaries
 - Graceful error handling and timeouts
+- Non-fatal failures for summarization and indexing
+- Dependencies: jq (optional, for indexing)
+
+### Planned - Phase 3
+- **Context Retrieval**: Automatic surfacing of relevant past sessions
+- **Smart Context Mode**: Intelligent context based on recent work and current directory
+
+### Planned - Phase 4
+- **Cross-Platform Support**: Full Linux and Windows testing
+- **Windows Scripts**: PowerShell version for native Windows use
 
 ## [1.0.0] - 2025-10-23
 
