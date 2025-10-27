@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - v2.0-alpha
 
+### Added - Phase 3 (2025-10-27)
+- **Context Retrieval**: Automatic display of relevant past sessions at startup
+  - Three retrieval modes: recent, smart (default), keywords
+  - Smart mode combines recent sessions + directory-based context
+  - Keyword search with relevance ranking
+  - Beautiful formatted display with colors and emojis
+  - Human-readable time (e.g., "3d ago")
+- **Context Commands**: Control context display
+  - `--no-context` - Disable context retrieval
+  - `--context MODE` - Set retrieval mode (recent/smart/keywords)
+  - `--context-keywords KW` - Search by specific keywords
+- **Display Features**: Rich formatted output
+  - Shows date, time ago, summary excerpt
+  - Lists tags (keywords) and files modified
+  - Color-coded with clean separators
+  - Non-intrusive (to stderr)
+
 ### Added - Phase 2 (2025-10-25)
 - **Keyword Indexing**: Automatic extraction and indexing of session keywords
   - Multi-source keyword extraction (summaries, file extensions, tech keywords)
@@ -36,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Summary files (*.summary) now created alongside logs
 - Metadata format extended with `has_summary` field
 - Index files stored in `.claude-record/` directory
-- Script size: 1,443 lines (was 676 for v1.0)
+- Script size: 1,722 lines (was 676 for v1.0)
+- Context now displays automatically at session start
 
 ### Technical
 - New file structure: `.claude-record/` for indexes
@@ -45,10 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Graceful error handling and timeouts
 - Non-fatal failures for summarization and indexing
 - Dependencies: jq (optional, for indexing)
-
-### Planned - Phase 3
-- **Context Retrieval**: Automatic surfacing of relevant past sessions
-- **Smart Context Mode**: Intelligent context based on recent work and current directory
 
 ### Planned - Phase 4
 - **Cross-Platform Support**: Full Linux and Windows testing
