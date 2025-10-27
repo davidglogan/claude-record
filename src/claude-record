@@ -27,6 +27,12 @@ MAX_LOG_SIZE_FOR_SUMMARY=$((10 * 1024 * 1024))  # 10MB in bytes
 SUMMARIZE_ONLY=false
 REBUILD_INDEX=false
 
+# Phase 3: Context Retrieval
+SHOW_CONTEXT=true
+CONTEXT_MODE="smart"  # "recent", "smart", "keywords"
+NUM_CONTEXT_SESSIONS=3
+CONTEXT_KEYWORDS=""
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -127,6 +133,9 @@ OPTIONS:
     --no-summarize         Disable automatic summary generation (v2.0)
     --summarize-only       Generate summary for most recent session and exit (v2.0)
     --rebuild-index        Rebuild keyword and session indexes from summaries (v2.0)
+    --no-context           Disable context retrieval at startup (v2.0)
+    --context MODE         Context mode: recent, smart, keywords (default: smart) (v2.0)
+    --context-keywords KW  Keywords for context search (space-separated) (v2.0)
     --version              Show version information
 
 SIZE FORMAT:
@@ -1134,6 +1143,260 @@ rebuild_indexes() {
 # END PHASE 2: KEYWORD INDEXING
 #==============================================================================
 
+#==============================================================================
+# PHASE 3: CONTEXT RETRIEVAL
+#==============================================================================
+
+# Get N most recent sessions from index
+get_recent_sessions() {
+    local num_recent="$1"
+    local index_file="$LOG_DIR/.claude-record/session-index.json"
+
+    if [[ ! -f "$index_file" ]]; then
+        echo "[]"
+        return
+    fi
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "[]"
+        return
+    fi
+
+    # Extract session IDs sorted by date (newest first)
+    local sessions=$(jq -r '.sessions | to_entries | sort_by(.value.date) | reverse | .[0:'$num_recent'] | .[].key' "$index_file" 2>/dev/null | jq -R . | jq -s . 2>/dev/null || echo "[]")
+
+    echo "$sessions"
+}
+
+# Search for sessions by keywords
+search_by_keywords() {
+    local keywords_str="$1"
+    local index_file="$LOG_DIR/.claude-record/keyword-index.json"
+
+    if [[ ! -f "$index_file" ]] || [[ -z "$keywords_str" ]]; then
+        echo "[]"
+        return
+    fi
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "[]"
+        return
+    fi
+
+    # Split keywords and search
+    local session_counts="{}"
+    IFS=' ' read -ra keywords <<< "$keywords_str"
+
+    for keyword in "${keywords[@]}"; do
+        keyword=$(echo "$keyword" | tr '[:upper:]' '[:lower:]')
+
+        # Get sessions for this keyword
+        local sessions=$(jq -r ".keywords[\"$keyword\"].sessions // []" "$index_file" 2>/dev/null || echo "[]")
+
+        # Count occurrences
+        if [[ "$sessions" != "[]" ]]; then
+            while read -r session_id; do
+                [[ -z "$session_id" ]] && continue
+                local count=$(echo "$session_counts" | jq -r ".[\"$session_id\"] // 0" 2>/dev/null || echo "0")
+                ((count++))
+                session_counts=$(echo "$session_counts" | jq ". + {\"$session_id\": $count}" 2>/dev/null)
+            done < <(echo "$sessions" | jq -r '.[]' 2>/dev/null)
+        fi
+    done
+
+    # Sort by count and return session IDs
+    local sorted=$(echo "$session_counts" | jq -r 'to_entries | sort_by(.value) | reverse | .[].key' 2>/dev/null | jq -R . | jq -s . 2>/dev/null || echo "[]")
+
+    echo "$sorted"
+}
+
+# Get sessions that modified files in current directory
+get_sessions_by_directory() {
+    local directory="$1"
+    local index_file="$LOG_DIR/.claude-record/session-index.json"
+
+    if [[ ! -f "$index_file" ]]; then
+        echo "[]"
+        return
+    fi
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        echo "[]"
+        return
+    fi
+
+    # Find sessions with files in this directory
+    local sessions=$(jq -r --arg dir "$directory" '
+        .sessions | to_entries |
+        map(select(.value.files_modified | any(startswith($dir)))) |
+        sort_by(.value.date) | reverse |
+        .[].key
+    ' "$index_file" 2>/dev/null | jq -R . | jq -s . 2>/dev/null || echo "[]")
+
+    echo "$sessions"
+}
+
+# Calculate time ago from ISO date
+calculate_time_ago() {
+    local date_str="$1"
+
+    # Extract date without timezone for macOS compatibility
+    local session_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${date_str:0:19}" "+%s" 2>/dev/null || echo "0")
+    local now_epoch=$(date "+%s")
+
+    if [[ "$session_epoch" == "0" ]]; then
+        echo "unknown"
+        return
+    fi
+
+    local diff=$((now_epoch - session_epoch))
+
+    if (( diff < 60 )); then
+        echo "${diff}s ago"
+    elif (( diff < 3600 )); then
+        echo "$((diff / 60))m ago"
+    elif (( diff < 86400 )); then
+        echo "$((diff / 3600))h ago"
+    elif (( diff < 604800 )); then
+        echo "$((diff / 86400))d ago"
+    else
+        echo "$((diff / 604800))w ago"
+    fi
+}
+
+# Display context to user
+display_context_to_user() {
+    local sessions_json="$1"
+
+    # Check if empty
+    local count=$(echo "$sessions_json" | jq 'length' 2>/dev/null || echo "0")
+    if [[ "$count" == "0" ]]; then
+        return
+    fi
+
+    local index_file="$LOG_DIR/.claude-record/session-index.json"
+    if [[ ! -f "$index_file" ]]; then
+        return
+    fi
+
+    # Print header
+    echo >&2
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo -e "${BLUE}📚 Relevant Past Sessions Found:${NC}" >&2
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo >&2
+
+    local num=1
+    while read -r session_id; do
+        [[ -z "$session_id" ]] && continue
+
+        # Get session data
+        local data=$(jq -r ".sessions[\"$session_id\"]" "$index_file" 2>/dev/null)
+        [[ "$data" == "null" ]] && continue
+
+        # Extract fields
+        local date=$(echo "$data" | jq -r '.date' 2>/dev/null)
+        local excerpt=$(echo "$data" | jq -r '.summary_excerpt' 2>/dev/null | cut -c 1-80)
+        local keywords=$(echo "$data" | jq -r '.keywords[0:5] | join(", ")' 2>/dev/null)
+        local files=$(echo "$data" | jq -r '.files_modified[0:3] | join(", ")' 2>/dev/null)
+        local file_count=$(echo "$data" | jq -r '.files_modified | length' 2>/dev/null || echo "0")
+
+        # Calculate time ago
+        local time_ago=$(calculate_time_ago "$date")
+
+        # Format date
+        local formatted_date=$(echo "${date:0:10} ${date:11:5}")
+
+        # Print session info
+        echo -e "${GREEN}[$num]${NC} ${formatted_date} ${YELLOW}(${time_ago})${NC}" >&2
+        echo -e "    ${excerpt}" >&2
+        if [[ -n "$keywords" ]] && [[ "$keywords" != "" ]]; then
+            echo -e "    ${PURPLE}Tags:${NC} ${keywords}" >&2
+        fi
+        if [[ -n "$files" ]] && [[ "$files" != "" ]]; then
+            if (( file_count > 3 )); then
+                echo -e "    ${PURPLE}Files:${NC} ${files}, ..." >&2
+            else
+                echo -e "    ${PURPLE}Files:${NC} ${files}" >&2
+            fi
+        fi
+        echo >&2
+
+        ((num++))
+    done < <(echo "$sessions_json" | jq -r '.[]' 2>/dev/null)
+
+    # Print footer
+    echo -e "${BLUE}💡 These summaries provide context for this session.${NC}" >&2
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}" >&2
+    echo >&2
+}
+
+# Main context retrieval function
+retrieve_context() {
+    # Skip if context disabled
+    if [[ "$SHOW_CONTEXT" != "true" ]]; then
+        return 0
+    fi
+
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        verbose_log "jq not found, skipping context retrieval"
+        return 0
+    fi
+
+    # Check if index exists
+    local index_file="$LOG_DIR/.claude-record/session-index.json"
+    if [[ ! -f "$index_file" ]]; then
+        verbose_log "No session index found, skipping context retrieval"
+        return 0
+    fi
+
+    local session_ids="[]"
+
+    # Choose retrieval strategy based on mode
+    case "$CONTEXT_MODE" in
+        recent)
+            session_ids=$(get_recent_sessions "$NUM_CONTEXT_SESSIONS")
+            ;;
+
+        smart)
+            # Combine recent + directory-based
+            local recent=$(get_recent_sessions 2)
+            local dir_based=$(get_sessions_by_directory "$PWD")
+
+            # Merge and deduplicate
+            session_ids=$(echo "$recent $dir_based" | jq -s 'add | unique | .[0:'$NUM_CONTEXT_SESSIONS']' 2>/dev/null || echo "[]")
+            ;;
+
+        keywords)
+            if [[ -n "$CONTEXT_KEYWORDS" ]]; then
+                session_ids=$(search_by_keywords "$CONTEXT_KEYWORDS")
+                # Limit to NUM_CONTEXT_SESSIONS
+                session_ids=$(echo "$session_ids" | jq '.[0:'$NUM_CONTEXT_SESSIONS']' 2>/dev/null || echo "[]")
+            else
+                # Fallback to recent if no keywords provided
+                session_ids=$(get_recent_sessions "$NUM_CONTEXT_SESSIONS")
+            fi
+            ;;
+
+        *)
+            session_ids=$(get_recent_sessions 3)
+            ;;
+    esac
+
+    # Display context to user
+    display_context_to_user "$session_ids"
+
+    return 0
+}
+
+#==============================================================================
+# END PHASE 3: CONTEXT RETRIEVAL
+#==============================================================================
+
 # Check if Claude command exists
 check_claude_command() {
     if ! command -v "$CLAUDE_CMD" &> /dev/null; then
@@ -1202,6 +1465,19 @@ parse_args() {
             --rebuild-index)
                 REBUILD_INDEX=true
                 shift
+                ;;
+            --no-context)
+                SHOW_CONTEXT=false
+                shift
+                ;;
+            --context)
+                CONTEXT_MODE="$2"
+                shift 2
+                ;;
+            --context-keywords)
+                CONTEXT_KEYWORDS="$2"
+                CONTEXT_MODE="keywords"
+                shift 2
                 ;;
             --version)
                 echo "$SCRIPT_NAME version $SCRIPT_VERSION"
@@ -1338,7 +1614,10 @@ main() {
     if [[ "$AUTO_CLEANUP" == "true" ]]; then
         cleanup_old_sessions
     fi
-    
+
+    # v2.0 Phase 3: Retrieve context from past sessions
+    retrieve_context
+
     # Generate log file
     local log_file
     log_file=$(generate_filename)
