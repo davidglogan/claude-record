@@ -54,6 +54,45 @@ LIST_SESSIONS=false
 SEARCH_TERM=""
 AUTO_CLEANUP=true
 
+# Platform detection
+detect_platform() {
+    case "$(uname -s)" in
+        Darwin*)    echo "macos" ;;
+        Linux*)     echo "linux" ;;
+        CYGWIN*|MINGW*|MSYS*) echo "windows" ;;
+        *)          echo "unknown" ;;
+    esac
+}
+
+PLATFORM=$(detect_platform)
+
+# Cross-platform date to epoch conversion
+# Converts ISO8601 date to Unix epoch timestamp
+date_to_epoch() {
+    local iso_date="$1"
+
+    # Extract just the date/time part (first 19 chars: YYYY-MM-DDTHH:MM:SS)
+    local clean_date="${iso_date:0:19}"
+
+    case "$PLATFORM" in
+        macos)
+            # BSD date (macOS)
+            date -j -f "%Y-%m-%dT%H:%M:%S" "$clean_date" "+%s" 2>/dev/null || echo "0"
+            ;;
+        linux)
+            # GNU date (Linux)
+            date -d "$clean_date" "+%s" 2>/dev/null || echo "0"
+            ;;
+        windows)
+            # Git Bash on Windows should have GNU date
+            date -d "$clean_date" "+%s" 2>/dev/null || echo "0"
+            ;;
+        *)
+            echo "0"
+            ;;
+    esac
+}
+
 # Utility functions
 log_info() {
     echo -e "${CYAN}[INFO]${NC} $1" >&2
@@ -558,9 +597,9 @@ generate_summary_claude_code() {
     local end_time=$(grep 'session_end=' "$meta_file" 2>/dev/null | cut -d'"' -f2)
 
     if [[ -n "$start_time" ]] && [[ -n "$end_time" ]]; then
-        # Try to calculate duration (macOS compatible)
-        local start_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${start_time:0:19}" "+%s" 2>/dev/null || echo "0")
-        local end_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${end_time:0:19}" "+%s" 2>/dev/null || echo "0")
+        # Calculate duration (cross-platform)
+        local start_epoch=$(date_to_epoch "$start_time")
+        local end_epoch=$(date_to_epoch "$end_time")
 
         if [[ "$start_epoch" != "0" ]] && [[ "$end_epoch" != "0" ]]; then
             local duration_seconds=$((end_epoch - start_epoch))
@@ -673,8 +712,8 @@ generate_summary() {
         local end_time=$(grep 'session_end=' "$meta_file" 2>/dev/null | cut -d'"' -f2)
 
         if [[ -n "$start_time" ]] && [[ -n "$end_time" ]]; then
-            local start_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${start_time:0:19}" "+%s" 2>/dev/null || echo "0")
-            local end_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${end_time:0:19}" "+%s" 2>/dev/null || echo "0")
+            local start_epoch=$(date_to_epoch "$start_time")
+            local end_epoch=$(date_to_epoch "$end_time")
 
             if [[ "$start_epoch" != "0" ]] && [[ "$end_epoch" != "0" ]]; then
                 local duration=$((end_epoch - start_epoch))
@@ -1078,8 +1117,8 @@ update_indexes() {
     local duration=0
 
     if [[ -n "$start_time" ]] && [[ -n "$end_time" ]]; then
-        local start_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${start_time:0:19}" "+%s" 2>/dev/null || echo "0")
-        local end_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${end_time:0:19}" "+%s" 2>/dev/null || echo "0")
+        local start_epoch=$(date_to_epoch "$start_time")
+        local end_epoch=$(date_to_epoch "$end_time")
         if [[ "$start_epoch" != "0" ]] && [[ "$end_epoch" != "0" ]]; then
             duration=$((end_epoch - start_epoch))
         fi
@@ -1243,8 +1282,8 @@ get_sessions_by_directory() {
 calculate_time_ago() {
     local date_str="$1"
 
-    # Extract date without timezone for macOS compatibility
-    local session_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${date_str:0:19}" "+%s" 2>/dev/null || echo "0")
+    # Calculate epoch using cross-platform function
+    local session_epoch=$(date_to_epoch "$date_str")
     local now_epoch=$(date "+%s")
 
     if [[ "$session_epoch" == "0" ]]; then

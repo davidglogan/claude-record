@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - v2.0-alpha
 
+### Added - Phase 4 (2025-10-27)
+- **Cross-Platform Support**: Automatic platform detection and compatibility
+  - Platform detection: macOS, Linux, Windows (Git Bash)
+  - Cross-platform date handling with `date_to_epoch()` function
+  - BSD date support (macOS) and GNU date support (Linux/Windows)
+  - All date calculations now platform-agnostic
+- **Platform Documentation**: Comprehensive PLATFORM_SUPPORT.md
+  - Installation instructions for each platform
+  - Dependency lists and installation commands
+  - Troubleshooting guide
+  - Testing checklists for Linux/Windows
+
 ### Added - Phase 3 (2025-10-27)
 - **Context Retrieval**: Automatic display of relevant past sessions at startup
   - Three retrieval modes: recent, smart (default), keywords
@@ -53,8 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Summary files (*.summary) now created alongside logs
 - Metadata format extended with `has_summary` field
 - Index files stored in `.claude-record/` directory
-- Script size: 1,722 lines (was 676 for v1.0)
+- Script size: 1,761 lines (was 676 for v1.0)
 - Context now displays automatically at session start
+- All date calculations now cross-platform compatible
 
 ### Technical
 - New file structure: `.claude-record/` for indexes
@@ -64,9 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-fatal failures for summarization and indexing
 - Dependencies: jq (optional, for indexing)
 
-### Planned - Phase 4
-- **Cross-Platform Support**: Full Linux and Windows testing
-- **Windows Scripts**: PowerShell version for native Windows use
+### Future Enhancements
+- **Native Windows PowerShell version**: Direct Windows support without Git Bash
+- **Automated cross-platform testing**: CI/CD pipeline for all platforms
+- **Vector search (Phase 5)**: Optional embeddings for semantic search
 
 ## [1.0.0] - 2025-10-23
 
